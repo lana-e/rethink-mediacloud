@@ -34,19 +34,34 @@ def clean_api_date(mediacloud_api, date_range, verbose=False):
         print(f"Date range: between {start_date.strftime('%m/%d/%Y')} and {end_date.strftime('%m/%d/%Y')}")
     return mediacloud_api.dates_as_query_clause(start_date, end_date)
 
-# building a function to search a string among the sources given
-def search_sources(query, sources, date_range=None, query_context=None, api_key=None, verbose=False, urls=False):
+# ensuring that the sources passed into functions are of the correct format
+# dict, with format {source_name: MediaCloud_ID}
+# setting relevant query parameter for individual source vs MediaCloud collection search
+def check_source_type(sources, source_type):
+    assert type(sources) == dict,\
+    "Please provide the sources in a dict, in the format <Source Name>: <MediaCloud ID>"
     
-    # initializing MediaCloud API and cleaning date_range
+    assert source_type in {"media", "collection"},\
+    'Please specify either "media" or "collection" as source_type.'
+    
+    if source_type == "media":
+        mc_source_type = "media_id"
+    elif source_type == "collection":
+        mc_source_type = "tags_id_media"
+    return mc_source_type
+
+# building a function to search a string among the sources given
+def search_sources(query, sources, source_type="media", date_range=None,
+                   query_context=None, api_key=None, verbose=False, urls=False):
+    
+    # initializing MediaCloud API, checking source format, cleaning date_range
     mc = init_mc_api(api_key=api_key)
+    mc_source_type = check_source_type(sources, source_type)
     api_date_range = clean_api_date(mc, date_range) if date_range else None
     
     # ensuring the query is a string
     query = str(query)
     print(f"Query: {query}")
-    
-    # ensuring sources are given in a dict
-    assert type(sources) == dict, "Please provide the sources in a dict, in the format <Source Name>: <MediaCloud ID>"
     
     # initializing dataframe to store the query data
     import pandas as pd
@@ -64,10 +79,10 @@ def search_sources(query, sources, date_range=None, query_context=None, api_key=
         
         # defining overall context and specific query for stories
         if query_context:
-            total_query = f'{query_context} and media_id:{sources[source_name]}'
+            total_query = f'({query_context}) and {mc_source_type}:{sources[source_name]}'
         else:
-            total_query = f'media_id:{sources[source_name]}'
-        api_query = f'{query} and {total_query}'
+            total_query = f'{mc_source_type}:{sources[source_name]}'
+        api_query = f'({query}) and {total_query}'
 
         # API calls to count relevant and total stories
         relevant_stories = mc.storyCount(api_query, api_date_range)['count']
@@ -99,19 +114,21 @@ def search_sources(query, sources, date_range=None, query_context=None, api_key=
     return story_counts
 
 # calculating number of 9/11 stories that mention some topics and keywords we're interested in
-def calculate_percentages(keywords, sources, date_range=None, query_context=None, api_key=None):
+def calculate_percentages(keywords, sources, source_type="media",
+                          date_range=None, query_context=None, api_key=None):
     
-    # initializing MediaCloud API and cleaning date_range
+    # initializing MediaCloud API, checking source format, cleaning date_range
     mc = init_mc_api(api_key=api_key)
+    mc_source_type = check_source_type(sources, source_type)
     api_date_range = clean_api_date(mc, date_range) if date_range else None
     
     # formatting media_ids for API query
     media_ids = list(sources.values())
-    api_media_ids = " OR ".join(f"media_id:{media_id}" for media_id in media_ids)
+    api_media_ids = " OR ".join(f"{mc_source_type}:{media_id}" for media_id in media_ids)
 
     # defining overall context and specific query for stories
     if query_context:
-        total_query = f'{query_context} and ({api_media_ids})'
+        total_query = f'({query_context}) and ({api_media_ids})'
     else:
         total_query = f'({api_media_ids})'
     
@@ -119,7 +136,7 @@ def calculate_percentages(keywords, sources, date_range=None, query_context=None
     all_keywords = " OR ".join(keywords)
 
     # adding queries to list to loop through later
-    keyword_queries = [f'{keyword} and {total_query}' for keyword in keywords+[f"({all_keywords})"]]
+    keyword_queries = [f'({keyword}) and {total_query}' for keyword in keywords+[f"({all_keywords})"]]
     
     # story count for query context
     total_results = mc.storyCount(total_query, api_date_range)['count']
@@ -141,19 +158,20 @@ def calculate_percentages(keywords, sources, date_range=None, query_context=None
     return keyword_percentages
 
 # adapting simple_word_cloud() function from Laura's previous code
-def word_cloud(query, sources, date_range, save_img=False, filename="wordcloud.png",
-               custom_stopwords=None, api_key=None, verbose=False):
+def word_cloud(query, sources, date_range, source_type="media", 
+               save_img=False, filename=None, custom_stopwords=None, api_key=None, verbose=False):
     
-    # initializing MediaCloud API and cleaning date_range
+    # initializing MediaCloud API, checking source format, cleaning date_range
     mc = init_mc_api(api_key=api_key)
+    mc_source_type = check_source_type(sources, source_type)
     api_date_range = clean_api_date(mc, date_range) if date_range else None
     
     # formatting query, sources, and date_range for API
     assert type(query) == str, "Please input a string as the query."
     media_ids = list(sources.values())
-    api_media_ids = " OR ".join([f"media_id:{media_id}" for media_id in media_ids])
+    api_media_ids = " OR ".join([f"{mc_source_type}:{media_id}" for media_id in media_ids])
     
-    api_query = f"{query} and ({api_media_ids})"
+    api_query = f"({query}) and ({api_media_ids})"
     if verbose:
         print(f"Query: {api_query}")
 
@@ -175,42 +193,43 @@ def word_cloud(query, sources, date_range, save_img=False, filename="wordcloud.p
                 continue
         word_freqs[top_words[word_id]] = word_freqs.pop(word_id)
     
-    # importing wordcloud modules
+    # importing modules for wordcloud
     from wordcloud import WordCloud, STOPWORDS
-    import matplotlib.pyplot as plt
     import re
+    import matplotlib.pyplot as plt
     
-    # adding query and custom stopwords to set
+    # adding query to stopwords for wordcloud, so it doesn't dominate the cloud
     stopwords = set(STOPWORDS)
     pattern = re.compile('[\W_]+')
-    query_stops = pattern.sub(' ', query)
-#     print(query_stops)
-#     print(set(query_stops.split()))
-    stopwords = stopwords.union(set(query_stops.split()))
+    query_split = query.lower().split()
+    query_stops = {pattern.sub('', word) for word in query_split}
+    stopwords.update(query_stops)
     if custom_stopwords:
-        stopwords = stopwords.union(custom_stopwords)
-#     print(stopwords)
-    
-    # creating wordcloud image
+        stopwords.update(custom_stopwords)
+    for stopword in stopwords:
+        if stopword in word_freqs:
+            del word_freqs[stopword]
     wc_fig = plt.figure()
-    word_cloud = WordCloud(background_color="white", width=3000, height=2000, 
-                           max_words=75, prefer_horizontal=1.0, stopwords=stopwords)
-    word_cloud.generate_from_frequencies(word_freqs)
-#     print(word_cloud.words_)
+    word_cloud = WordCloud(background_color="white", width=3000, height=2000,
+                           stopwords=stopwords, max_words=75, prefer_horizontal=1.0)
+    word_cloud.fit_words(word_freqs)
     plt.imshow(word_cloud)
     plt.axis("off")
     plt.show()
     if save_img:
-        word_cloud.to_file(filename)
-        
+        if filename:
+            word_cloud.to_file(filename)
+        else:
+            word_cloud.to_file("wordcloud.png")
     return wc_fig
 
 # function to plot attention over time for one or more queries
-def attention_plots(queries, sources, date_range, query_context=None, api_key=None, 
-                    save_img=False, filename="attention_plot.png", fig_size=(10,5), verbose=False):
+def attention_plots(queries, sources, date_range, source_type="media", query_context=None,
+                    api_key=None, query_labels=None, fig_size=(10,5), verbose=False):
     
-    # initializing MediaCloud API and cleaning date_range
+    # initializing MediaCloud API, checking source format, cleaning date_range
     mc = init_mc_api(api_key=api_key)
+    mc_source_type = check_source_type(sources, source_type)
     api_date_range = clean_api_date(mc, date_range) if date_range else None
     
     # formatting query for plots
@@ -221,22 +240,27 @@ def attention_plots(queries, sources, date_range, query_context=None, api_key=No
         
     # formatting media_ids for API query
     media_ids = list(sources.values())
-    api_media_ids = " OR ".join(f"media_id:{media_id}" for media_id in media_ids)
+    api_media_ids = " OR ".join(f"{mc_source_type}:{media_id}" for media_id in media_ids)
     
     # looping over each query and adding attention vs time plot to figure
     import matplotlib.pyplot as plt
     figure = plt.figure(figsize=fig_size)
-    i = 1
+    if query_labels:
+        labels = query_labels
+    else:
+        labels = [f"Query {n}" for n in range(len(queries))]
+    
+    i = 0
     for query in queries:
         if verbose:
             print(f"Query {i}: {query}")
         
         # defining overall context and specific queries
         if query_context:
-            total_query = f"{query_context} and ({api_media_ids})"
+            total_query = f"({query_context}) and ({api_media_ids})"
         else:
             total_query = f"({api_media_ids})"
-        relevant_query = f"{query} and {total_query}"
+        relevant_query = f"({query}) and {total_query}"
         
         # making API calls for relevant and total story counts (by day)
         relevant_results = mc.storyCount(relevant_query, api_date_range, split=True, split_period='day')['counts']
@@ -259,10 +283,7 @@ def attention_plots(queries, sources, date_range, query_context=None, api_key=No
         
         # calculating attention
         join_df["attention"] = (join_df["count_relevant"] / join_df["count_total"]) * 100
-        
-        # plotting attention over time
-        label = f"Query {i}"
-        plt.plot(join_df["date"], join_df["attention"], '-', label=label)
+        plt.plot(join_df["date"], join_df["attention"], '-', label=labels[i])
         
         i += 1
     
@@ -273,9 +294,4 @@ def attention_plots(queries, sources, date_range, query_context=None, api_key=No
     plt.ylabel("Attention in sources (%)")
     plt.xticks(rotation=60)
     plt.show()
-    
-    # saving image
-    if save_img:
-        figure.savefig(filename, bbox_inches="tight", facecolor="w")
-        
     return figure
