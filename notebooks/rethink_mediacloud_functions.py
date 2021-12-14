@@ -113,8 +113,8 @@ def search_sources(query, sources, source_type="media", date_range=None,
     
     return story_counts
 
-# calculating number of 9/11 stories that mention some topics and keywords we're interested in
-def calculate_percentages(keywords, sources, source_type="media",
+# calculating number of stories that mention some topics and keywords we're interested in
+def calculate_percentages(keywords, sources, source_type="media", keyword_labels=None,
                           date_range=None, query_context=None, api_key=None):
     
     # initializing MediaCloud API, checking source format, cleaning date_range
@@ -144,15 +144,16 @@ def calculate_percentages(keywords, sources, source_type="media",
     # keyword story counts
     keyword_results = [mc.storyCount(keyword_query, api_date_range)['count'] for keyword_query in keyword_queries]
     
-    # calculating percentages of 9/11 stories that mentioned endless war, profiling, and afghanistan
+    # calculating percentages of stories that mention keywords
     import numpy as np
     keyword_percentages = np.divide(keyword_results, total_results) * 100
     keyword_percentages = np.around(keyword_percentages, decimals=2)
     
     # printing percentages
     print("Percentage of stories within specified context that mention:\n")
+    labels = keyword_labels if keyword_labels else keywords
     for i in range(len(keywords)):
-        print(f"{keywords[i]}: {keyword_percentages[i]}%\n")
+        print(f"{labels[i]}: {keyword_percentages[i]}%\n")
     print(f"All Keywords: {keyword_percentages[-1]}%")
     
     return keyword_percentages
