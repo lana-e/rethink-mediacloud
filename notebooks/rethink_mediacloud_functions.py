@@ -30,6 +30,12 @@ def clean_api_date(mediacloud_api, date_range, verbose=False):
     # parsing dates, returning API date range clause
     start_date = parser.parse(date_range[0])
     end_date = parser.parse(date_range[1])
+    
+    # ensuring end_date is later than start_date
+    if start_date > end_date:
+        raise Exception("The first date in date_range must be an earlier date than the second.")
+    
+    # printing output if verbose is True
     if verbose:
         print(f"Date range: between {start_date.strftime('%m/%d/%Y')} and {end_date.strftime('%m/%d/%Y')}")
     return mediacloud_api.dates_as_query_clause(start_date, end_date)
